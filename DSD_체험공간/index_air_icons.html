@@ -1,0 +1,1699 @@
+<!doctype html> 
+<html lang="ko"> 
+  <head> 
+    <meta charset="UTF-8" /> 
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /> 
+    <title>DSD Experience Space</title> 
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js">
+  </script> 
+    <script>
+      AFRAME.registerComponent('lock-y-position', {
+        schema: { height: { type: 'number', default: 1.65 } },
+        tick: function () {
+          this.el.object3D.position.y = this.data.height;
+        }
+      });
+
+      AFRAME.registerComponent('fade-floor', {
+        init: function () {
+          var applyTexture = () => {
+            var mesh = this.el.getObject3D('mesh');
+            if (!mesh) return;
+
+            mesh.material = new THREE.MeshBasicMaterial({
+              map: texture,
+              transparent: true,
+              side: THREE.DoubleSide,
+              depthWrite: false
+            });
+          };
+
+          var canvas = document.createElement('canvas');
+          canvas.width = 1024;
+          canvas.height = 1024;
+
+          var ctx = canvas.getContext('2d');
+          var gradient = ctx.createRadialGradient(512, 520, 80, 512, 520, 520);
+          gradient.addColorStop(0, 'rgba(143, 145, 152, 1)');
+          gradient.addColorStop(0.54, 'rgba(143, 145, 152, 0.92)');
+          gradient.addColorStop(0.78, 'rgba(143, 145, 152, 0.42)');
+          gradient.addColorStop(1, 'rgba(143, 145, 152, 0)');
+
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          var texture = new THREE.CanvasTexture(canvas);
+          texture.needsUpdate = true;
+          applyTexture();
+          this.el.addEventListener('object3dset', applyTexture);
+        }
+      });
+
+      AFRAME.registerComponent('apple-floor-mark', {
+        init: function () {
+          var applyTexture = () => {
+            var mesh = this.el.getObject3D('mesh');
+            if (!mesh) return;
+
+            mesh.material = new THREE.MeshBasicMaterial({
+              map: texture,
+              transparent: true,
+              side: THREE.DoubleSide,
+              depthWrite: false
+            });
+          };
+
+          var canvas = document.createElement('canvas');
+          canvas.width = 1024;
+          canvas.height = 1024;
+
+          var ctx = canvas.getContext('2d');
+          var logoPath = new Path2D("m13.0729 17.6825a3.61 3.61 0 0 0-1.7248 3.0365 3.5132 3.5132 0 0 0 2.1379 3.2223 8.394 8.394 0 0 1-1.0948 2.2618c-.6816.9812-1.3943 1.9623-2.4787 1.9623s-1.3633-.63-2.613-.63c-1.2187 0-1.6525.6507-2.644.6507s-1.6834-.9089-2.4787-2.0243a9.7842 9.7842 0 0 1-1.6628-5.2776c0-3.0984 2.014-4.7405 3.9969-4.7405 1.0535 0 1.9314.6919 2.5924.6919.63 0 1.6112-.7333 2.8092-.7333a3.7579 3.7579 0 0 1 3.1604 1.5802zm-3.7284-2.8918a3.5615 3.5615 0 0 0 .8469-2.22 1.5353 1.5353 0 0 0-.031-.32 3.5686 3.5686 0 0 0-2.3445 1.2084 3.4629 3.4629 0 0 0-.8779 2.1585 1.419 1.419 0 0 0 .031.2892 1.19 1.19 0 0 0 .2169.0207 3.0935 3.0935 0 0 0 2.1586-1.1368z");
+          var scale = 40;
+
+          ctx.translate((canvas.width - 14 * scale) / 2, (canvas.height - 20 * scale) / 2 - 10 * scale);
+          ctx.scale(scale, scale);
+          ctx.fillStyle = '#000000';
+          ctx.fill(logoPath);
+
+          var texture = new THREE.CanvasTexture(canvas);
+          texture.needsUpdate = true;
+          applyTexture();
+          this.el.addEventListener('object3dset', applyTexture);
+        }
+      });
+
+      AFRAME.registerComponent('screen-tool', {
+        init: function () {
+          this.screens = [];
+          this.activeScreen = null;
+          this.movingScreen = null;
+          this.isPlacing = false;
+          this.camera = null;
+          this.webLayer = null;
+          this.iconPalette = null;
+          this.iconLayer = null;
+          this.presets = this.getScreenPresets();
+          this.pointer = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+
+          var setupUi = () => {
+            this.camera = document.querySelector('a-camera');
+            this.button = document.querySelector('#screen-button');
+            this.videoButton = document.querySelector('#video-mode-button');
+            this.panel = document.querySelector('#screen-panel');
+            this.widthSlider = document.querySelector('#screen-width');
+            this.heightSlider = document.querySelector('#screen-height');
+            this.curveSlider = document.querySelector('#screen-curve');
+            this.urlInput = document.querySelector('#screen-url');
+            this.goButton = document.querySelector('#screen-go');
+            this.webLayer = document.querySelector('#screen-web-layer');
+            this.iconLayer = document.querySelector('#air-icon-layer');
+            if (!this.button) return;
+            this.button.addEventListener('pointerdown', this.toggleIconPalette.bind(this));
+            this.videoButton.addEventListener('pointerdown', this.startVideoModeFromButton.bind(this));
+            this.panel.addEventListener('pointerdown', (event) => {
+              event.stopPropagation();
+              this.finishPlacement();
+            });
+            this.panel.addEventListener('click', (event) => event.stopPropagation());
+            this.widthSlider.addEventListener('input', this.updateActiveSizeFromPanel.bind(this));
+            this.heightSlider.addEventListener('input', this.updateActiveSizeFromPanel.bind(this));
+            this.curveSlider.addEventListener('input', this.updateActiveSizeFromPanel.bind(this));
+            this.goButton.addEventListener('click', this.loadActiveUrl.bind(this));
+            this.urlInput.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter') this.loadActiveUrl();
+            });
+            window.addEventListener('pointermove', this.trackPointer.bind(this));
+            window.addEventListener('pointerup', this.finishPointerAction.bind(this));
+            window.addEventListener('pointercancel', this.finishPointerAction.bind(this));
+            window.addEventListener('mousemove', this.trackPointer.bind(this));
+            window.addEventListener('mouseup', this.finishPointerAction.bind(this));
+          };
+
+          if (document.readyState === 'loading') {
+            window.addEventListener('DOMContentLoaded', setupUi);
+          } else {
+            window.setTimeout(setupUi, 0);
+          }
+
+          this.el.addEventListener('click', (event) => {
+            if (this.isPlacing) {
+              event.preventDefault();
+              event.stopPropagation();
+              this.finishPlacement();
+            }
+          });
+        },
+
+        startFromButton: function (event) {
+          event.preventDefault();
+          this.trackPointer(event);
+          this.isPlacing = true;
+          this.button.classList.add('is-active');
+          this.movingScreen = this.createScreen();
+          this.selectScreen(this.movingScreen);
+        },
+
+        startVideoModeFromButton: function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          this.trackPointer(event);
+          this.hideIconPalette();
+          this.finishPlacement();
+
+          var screen = this.createScreen({ videoMode: true });
+          this.placeEntityInFront(screen.root, 3.3, 0);
+          this.selectScreen(screen);
+          this.loadVideoUrl('https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', screen);
+        },
+
+        getScreenPresets: function () {
+          return [
+            { id: 'google', label: 'Google', url: 'google.com', mark: 'G', logo: '로고/google.png', color: '#ffffff', textColor: '#4285f4' },
+            { id: 'coupang', label: 'Coupang', url: 'coupang.com', mark: 'Cp', logo: '로고/coupang.png', color: '#ffffff', textColor: '#ef4444' },
+            { id: 'wikipedia', label: 'Wikipedia', url: 'wikipedia.org', mark: 'W', color: '#f8fafc', textColor: '#111827' },
+            { id: 'naverDict', label: 'Naver Dict', url: 'dict.naver.com', mark: 'N', color: '#03c75a', textColor: '#ffffff' },
+            { id: 'jsfiddle', label: 'JSFiddle', url: 'jsfiddle.net', mark: 'JS', color: '#1f2937', textColor: '#fbbf24' }
+          ];
+        },
+
+        toggleIconPalette: function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          this.trackPointer(event);
+
+          var paletteVisible = this.iconLayer && this.iconLayer.classList.contains('is-visible');
+          if (paletteVisible) {
+            this.hideIconPalette();
+            return;
+          }
+
+          this.showIconPalette();
+        },
+
+        showIconPalette: function () {
+          if (!this.iconLayer) return;
+
+          if (!this.iconPalette) {
+            this.iconPalette = document.createElement('div');
+            this.iconPalette.setAttribute('id', 'air-icon-palette');
+            this.iconPalette.className = 'air-icon-palette';
+
+            this.presets.forEach((preset, index) => {
+              var icon = this.createAirIcon(preset);
+              icon.style.setProperty('--icon-delay', (index * 42) + 'ms');
+              this.iconPalette.appendChild(icon);
+            });
+
+            this.iconLayer.appendChild(this.iconPalette);
+          }
+
+          this.iconLayer.classList.add('is-visible');
+          this.button.classList.add('is-active');
+        },
+
+        hideIconPalette: function () {
+          if (this.iconLayer) this.iconLayer.classList.remove('is-visible');
+          this.button.classList.remove('is-active');
+        },
+
+        createAirIcon: function (preset) {
+          var icon = document.createElement('button');
+          icon.setAttribute('type', 'button');
+          icon.setAttribute('class', 'screen-launch-icon');
+          icon.setAttribute('data-screen-preset', preset.id);
+
+          var mark = document.createElement('span');
+          mark.className = 'screen-launch-mark';
+          mark.style.background = preset.color;
+          mark.style.color = preset.textColor;
+
+          if (preset.logo) {
+            mark.classList.add('screen-launch-mark-logo');
+            mark.classList.add('screen-launch-mark-' + preset.id);
+            var logo = document.createElement('img');
+            logo.src = preset.logo;
+            logo.alt = preset.label;
+            mark.appendChild(logo);
+          } else {
+            mark.textContent = preset.mark;
+          }
+
+          icon.appendChild(mark);
+
+          var label = document.createElement('span');
+          label.className = 'screen-launch-label';
+          label.textContent = preset.label;
+          icon.appendChild(label);
+
+          icon.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.createPresetScreen(preset.id);
+          });
+
+          return icon;
+        },
+
+        createPresetScreen: function (preset) {
+          this.hideIconPalette();
+          var screen = this.createScreen();
+          this.placeEntityInFront(screen.root, 3.7, 0);
+          this.selectScreen(screen);
+          this.loadPresetUrl(preset, screen);
+        },
+
+        placeEntityInFront: function (entity, distance, yOffset) {
+          if (!this.camera || !this.el.camera) return;
+
+          var cameraObject = this.camera.object3D;
+          var cameraPosition = new THREE.Vector3();
+          var direction = new THREE.Vector3();
+          cameraObject.getWorldPosition(cameraPosition);
+          cameraObject.getWorldDirection(direction);
+
+          var target = cameraPosition.clone().add(direction.multiplyScalar(distance));
+          target.y = Math.max(0.85, target.y + yOffset);
+          entity.object3D.position.copy(target);
+          entity.object3D.lookAt(cameraPosition);
+        },
+
+        trackPointer: function (event) {
+          if (event.clientX !== undefined && event.clientY !== undefined) {
+            this.pointer.x = event.clientX;
+            this.pointer.y = event.clientY;
+          }
+        },
+
+        finishPointerAction: function () {
+          if (!this.isPlacing) return;
+          this.finishPlacement();
+        },
+
+        startScreenDrag: function (event, screen) {
+          if (this.isControlTarget(event.target)) return;
+
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.currentTarget && event.pointerId !== undefined && event.currentTarget.setPointerCapture) {
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }
+          this.trackPointer(event);
+          this.selectScreen(screen);
+          this.movingScreen = screen;
+          this.isPlacing = true;
+          this.button.classList.add('is-active');
+        },
+
+        createScreen: function (options) {
+          options = options || {};
+          var screen = {
+            width: options.videoMode ? 7.2 : 3.2,
+            height: options.videoMode ? 2.6 : 1.8,
+            curve: options.videoMode ? 170 : 0,
+            videoMode: !!options.videoMode,
+            url: '',
+            iframe: null,
+            video: null,
+            videoTexture: null,
+            dragHandle: null,
+            root: document.createElement('a-entity')
+          };
+
+          screen.root.setAttribute('class', 'floating-screen');
+          screen.root.setAttribute('position', '0 1.65 -3.5');
+          screen.root.setAttribute('shadow', 'cast: false; receive: false');
+
+          screen.iframe = document.createElement('iframe');
+          screen.iframe.className = 'screen-webview';
+          screen.iframe.setAttribute('allow', 'fullscreen; clipboard-read; clipboard-write');
+          screen.iframe.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
+          screen.iframe.setAttribute('title', 'Screen web browser');
+          screen.iframe.hidden = true;
+          this.webLayer.appendChild(screen.iframe);
+
+          screen.video = document.createElement('video');
+          screen.video.className = 'screen-video-source';
+          screen.video.setAttribute('playsinline', '');
+          screen.video.setAttribute('webkit-playsinline', '');
+          screen.video.crossOrigin = 'anonymous';
+          screen.video.loop = true;
+          screen.video.muted = true;
+          screen.video.hidden = true;
+          this.webLayer.appendChild(screen.video);
+
+          screen.dragHandle = document.createElement('button');
+          screen.dragHandle.className = 'screen-drag-handle';
+          screen.dragHandle.type = 'button';
+          screen.dragHandle.setAttribute('aria-label', 'Move screen');
+          screen.dragHandle.innerHTML = '<span></span>';
+          var startHtmlDrag = (event) => this.startScreenDrag(event, screen);
+          screen.dragHandle.addEventListener('mousedown', startHtmlDrag);
+          screen.dragHandle.addEventListener('pointerdown', startHtmlDrag);
+          screen.dragHandle.hidden = true;
+          this.webLayer.appendChild(screen.dragHandle);
+
+          screen.panel = document.createElement('a-entity');
+          screen.panel.setAttribute('class', 'floating-screen');
+          screen.root.appendChild(screen.panel);
+
+          screen.border = document.createElement('a-entity');
+          screen.border.setAttribute('class', 'floating-screen');
+          screen.border.setAttribute('position', '0 0 -0.01');
+          screen.root.appendChild(screen.border);
+
+          screen.deleteButton = this.createDeleteButton();
+          screen.deleteButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.deleteScreen(screen);
+          });
+          screen.root.appendChild(screen.deleteButton);
+
+          screen.root.addEventListener('click', (event) => {
+            if (this.isControlTarget(event.target)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            this.selectScreen(screen);
+          });
+
+          this.el.appendChild(screen.root);
+          this.screens.push(screen);
+          this.updateScreenSize(screen);
+          this.setControlsVisible(screen, false);
+          return screen;
+        },
+
+        createLauncher: function (screen) {
+          var launcher = document.createElement('div');
+          launcher.className = 'screen-launcher';
+          launcher.innerHTML = [
+            '<div class="mac-wallpaper"></div>',
+            '<div class="mac-window mac-window-back">',
+            '<div class="mac-window-bar"><span></span><span></span><span></span></div>',
+            '<div class="mac-window-hero">Explore</div>',
+            '</div>',
+            '<div class="mac-window mac-window-front">',
+            '<div class="mac-window-bar"><span></span><span></span><span></span></div>',
+            '<div class="screen-launcher-grid">',
+            this.createLauncherButton('google', 'Google', 'google'),
+            this.createLauncherButton('coupang', 'Coupang', 'coupang'),
+            this.createLauncherButton('wikipedia', 'Wikipedia', 'https://cdn.simpleicons.org/wikipedia'),
+            this.createLauncherButton('naverDict', 'Naver Dict', 'https://cdn.simpleicons.org/naver'),
+            this.createLauncherButton('jsfiddle', 'JSFiddle', 'https://cdn.simpleicons.org/jsfiddle'),
+            '</div>',
+            '</div>',
+            '<div class="mac-dock">',
+            '<span></span><span></span><span></span><span></span><span></span><span></span>',
+            '</div>'
+          ].join('');
+
+          launcher.addEventListener('pointerdown', (event) => event.stopPropagation());
+          launcher.addEventListener('click', (event) => {
+            var button = event.target.closest('[data-screen-preset]');
+            if (!button) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+            this.selectScreen(screen);
+            this.loadPresetUrl(button.dataset.screenPreset, screen);
+          });
+
+          return launcher;
+        },
+
+        createLauncherButton: function (preset, label, icon) {
+          var iconMarkup = '<img src="' + icon + '" alt="" />';
+
+          if (icon === 'google') {
+            iconMarkup = '<img src="로고/google.png" alt="Google" />';
+          }
+
+          if (icon === 'coupang') {
+            iconMarkup = '<img src="로고/coupang.png" alt="Coupang" />';
+          }
+
+          return [
+            '<button class="screen-launcher-button" type="button" data-screen-preset="' + preset + '">',
+            '<span class="screen-launcher-icon">' + iconMarkup + '</span>',
+            '<span>' + label + '</span>',
+            '</button>'
+          ].join('');
+        },
+
+        createDeleteButton: function () {
+          var button = document.createElement('a-entity');
+          button.setAttribute('class', 'screen-control');
+          button.setAttribute('data-control', 'delete');
+          button.setAttribute('visible', false);
+
+          var circle = document.createElement('a-entity');
+          circle.setAttribute('class', 'screen-control');
+          circle.setAttribute('geometry', 'primitive: circle; radius: 0.18; segments: 48');
+          circle.setAttribute('material', 'color: #64748b; opacity: 0.42; transparent: true; side: double');
+          circle.setAttribute('position', '0 0 0');
+          button.appendChild(circle);
+
+          var shine = document.createElement('a-entity');
+          shine.setAttribute('class', 'screen-control');
+          shine.setAttribute('geometry', 'primitive: circle; radius: 0.14; segments: 48');
+          shine.setAttribute('material', 'color: #ffffff; opacity: 0.12; transparent: true; side: double');
+          shine.setAttribute('position', '-0.03 0.03 0.006');
+          button.appendChild(shine);
+
+          var label = document.createElement('a-entity');
+          label.setAttribute('class', 'screen-control');
+          label.setAttribute('text', 'value: x; align: center; width: 1.4; color: #ffffff; zOffset: 0.02');
+          label.setAttribute('position', '0 0 0.015');
+          button.appendChild(label);
+
+          return button;
+        },
+
+        createControl: function (name, color) {
+          var control = document.createElement('a-entity');
+          control.setAttribute('class', 'screen-control');
+          control.setAttribute('data-control', name);
+          control.setAttribute('material', 'color: ' + color + '; opacity: 0.92; transparent: true; side: double');
+          control.setAttribute('visible', false);
+          return control;
+        },
+
+        isControlTarget: function (target) {
+          return target && target.classList && target.classList.contains('screen-control');
+        },
+
+        selectScreen: function (screen) {
+          this.activeScreen = screen;
+          this.screens.forEach((item) => this.setControlsVisible(item, item === screen));
+          this.syncPanelWithScreen(screen);
+          this.panel.classList.add('is-visible');
+        },
+
+        setControlsVisible: function (screen, visible) {
+          screen.deleteButton.setAttribute('visible', visible);
+        },
+
+        syncPanelWithScreen: function (screen) {
+          this.widthSlider.max = screen.videoMode ? 14 : 12;
+          this.heightSlider.max = screen.videoMode ? 7 : 6;
+          this.curveSlider.min = screen.videoMode ? 60 : 0;
+          this.curveSlider.max = screen.videoMode ? 170 : 1.6;
+          this.curveSlider.step = screen.videoMode ? 5 : 0.1;
+          this.urlInput.placeholder = screen.videoMode ? 'https://example.com/video.mp4' : 'https://example.com';
+          document.querySelector('#screen-curve-label').classList.toggle('is-hidden', !screen.videoMode);
+          this.widthSlider.value = screen.width;
+          this.heightSlider.value = screen.height;
+          this.curveSlider.value = screen.curve;
+          this.urlInput.value = screen.url;
+          document.querySelector('#screen-width-value').textContent = screen.width.toFixed(1);
+          document.querySelector('#screen-height-value').textContent = screen.height.toFixed(1);
+          document.querySelector('#screen-curve-value').textContent = screen.curve.toFixed(1);
+        },
+
+        updateActiveSizeFromPanel: function () {
+          if (!this.activeScreen) return;
+
+          this.activeScreen.width = parseFloat(this.widthSlider.value);
+          this.activeScreen.height = parseFloat(this.heightSlider.value);
+          this.activeScreen.curve = parseFloat(this.curveSlider.value);
+          this.updateScreenSize(this.activeScreen);
+          this.syncPanelWithScreen(this.activeScreen);
+        },
+
+        loadActiveUrl: function () {
+          if (!this.activeScreen) return;
+
+          var rawUrl = this.urlInput.value.trim();
+          if (!rawUrl) return;
+
+          if (this.activeScreen.videoMode && !this.isVideoUrl(rawUrl)) {
+            this.urlInput.value = this.activeScreen.url;
+            return;
+          }
+
+          var normalizedUrl = this.isVideoUrl(rawUrl) ? this.normalizeVideoUrl(rawUrl) : this.normalizeWebUrl(rawUrl);
+          if (this.isVideoUrl(normalizedUrl)) {
+            this.loadVideoUrl(normalizedUrl, this.activeScreen);
+          } else {
+            this.clearVideoTexture(this.activeScreen);
+            this.activeScreen.url = normalizedUrl;
+            this.activeScreen.iframe.src = normalizedUrl;
+            this.activeScreen.iframe.hidden = false;
+          }
+          this.urlInput.value = normalizedUrl;
+          this.syncPanelWithScreen(this.activeScreen);
+        },
+
+        loadPresetUrl: function (preset, targetScreen) {
+          var screen = targetScreen || this.activeScreen;
+          if (!screen) return;
+
+          var foundPreset = this.presets.find((item) => item.id === preset);
+          var presetUrl = this.normalizeWebUrl(foundPreset ? foundPreset.url : preset);
+
+          this.urlInput.value = presetUrl;
+          this.clearVideoTexture(screen);
+          screen.url = presetUrl;
+          screen.iframe.src = presetUrl;
+          screen.iframe.hidden = false;
+          this.syncPanelWithScreen(screen);
+        },
+
+        isVideoUrl: function (url) {
+          return /\.(mp4|webm|ogg)(?:[?#].*)?$/i.test(url);
+        },
+
+        normalizeVideoUrl: function (rawUrl) {
+          if (/^(https?:|blob:|data:|\.{0,2}\/|\/)/i.test(rawUrl)) return rawUrl;
+
+          var firstPathPart = rawUrl.split('/')[0];
+          return firstPathPart.indexOf('.') > -1 ? 'https://' + rawUrl : rawUrl;
+        },
+
+        loadVideoUrl: function (url, screen) {
+          this.clearVideoTexture(screen);
+          screen.width = Math.max(screen.width, 5.8);
+          screen.height = Math.max(screen.height, 2.3);
+          screen.curve = screen.videoMode ? Math.max(screen.curve, 170) : Math.max(screen.curve, 1.0);
+          screen.url = url;
+          screen.iframe.hidden = true;
+          screen.iframe.src = 'about:blank';
+          screen.video.src = url;
+          screen.video.load();
+          screen.video.play().catch(function () {});
+          screen.videoTexture = new THREE.VideoTexture(screen.video);
+          screen.videoTexture.colorSpace = THREE.SRGBColorSpace;
+          screen.videoTexture.minFilter = THREE.LinearFilter;
+          screen.videoTexture.magFilter = THREE.LinearFilter;
+          this.updateScreenSize(screen);
+        },
+
+        clearVideoTexture: function (screen) {
+          if (!screen || !screen.videoTexture) return;
+
+          screen.video.pause();
+          screen.video.removeAttribute('src');
+          screen.video.load();
+          screen.videoTexture.dispose();
+          screen.videoTexture = null;
+          this.updateScreenSize(screen);
+        },
+
+        normalizeWebUrl: function (rawUrl) {
+          var normalizedUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : 'https://' + rawUrl;
+
+          try {
+            var url = new URL(normalizedUrl);
+            var host = url.hostname.replace(/^www\./, '');
+            if (host === 'google.com') {
+              if (url.pathname === '/' || url.pathname === '') {
+                url.pathname = '/webhp';
+              }
+              url.searchParams.set('igu', '1');
+              url.searchParams.set('pws', '0');
+              url.searchParams.set('complete', '0');
+              url.searchParams.set('hl', 'ko');
+              return url.toString();
+            }
+
+            if (host === 'coupang.com') {
+              url.hostname = 'www.coupang.com';
+              return url.toString();
+            }
+
+            if (host === 'wikipedia.org') {
+              url.hostname = 'www.wikipedia.org';
+              return url.toString();
+            }
+
+            if (host === 'naver.com' || host === 'dict.naver.com') {
+              url.hostname = 'dict.naver.com';
+              return url.toString();
+            }
+
+            if (host === 'jsfiddle.net') {
+              return url.toString();
+            }
+          } catch (error) {
+            return normalizedUrl;
+          }
+
+          return normalizedUrl;
+        },
+
+        updateScreenSize: function (screen) {
+          if (screen.videoMode) {
+            this.updateArcScreenMesh(screen.panel, screen.width, screen.height, screen.curve, '#020617', 1, screen.videoTexture);
+            this.updateArcScreenMesh(screen.border, screen.width + 0.08, screen.height + 0.08, screen.curve, '#020617', 1);
+          } else {
+            this.updateScreenMesh(screen.panel, screen.width, screen.height, screen.curve, '#020617', 1, screen.videoTexture);
+            this.updateScreenMesh(screen.border, screen.width + 0.08, screen.height + 0.08, screen.curve, '#020617', 1);
+          }
+          var deleteX = screen.width / 2 + 0.22;
+          if (screen.videoMode) {
+            var angle = THREE.MathUtils.degToRad(Math.max(10, Math.min(170, screen.curve)));
+            deleteX = Math.sin(angle / 2) * (screen.width / angle) + 0.22;
+          }
+          screen.deleteButton.setAttribute('position', deleteX + ' ' + (screen.height / 2 + 0.22) + ' 0.04');
+        },
+
+        updateArcScreenMesh: function (entity, width, height, angleDegrees, color, opacity, texture) {
+          var segments = 96;
+          var angle = THREE.MathUtils.degToRad(Math.max(10, Math.min(170, angleDegrees)));
+          var radius = width / angle;
+          var geometry = new THREE.PlaneGeometry(width, height, segments, 1);
+          var position = geometry.attributes.position;
+          var halfWidth = width / 2;
+
+          for (var i = 0; i < position.count; i++) {
+            var x = position.getX(i);
+            var arcAngle = (x / halfWidth) * (angle / 2);
+            position.setX(i, Math.sin(arcAngle) * radius);
+            position.setZ(i, (Math.cos(arcAngle) - Math.cos(angle / 2)) * radius);
+          }
+
+          geometry.computeVertexNormals();
+
+          var oldMesh = entity.getObject3D('mesh');
+          if (oldMesh) {
+            oldMesh.geometry.dispose();
+            oldMesh.material.dispose();
+          }
+
+          var material = texture
+            ? new THREE.MeshBasicMaterial({
+              map: texture,
+              side: THREE.DoubleSide,
+              toneMapped: false
+            })
+            : new THREE.MeshBasicMaterial({
+              color: color,
+              opacity: opacity,
+              transparent: opacity < 1,
+              side: THREE.DoubleSide
+            });
+          entity.setObject3D('mesh', new THREE.Mesh(geometry, material));
+        },
+
+        updateScreenMesh: function (entity, width, height, curve, color, opacity, texture) {
+          var segments = 40;
+          var geometry = new THREE.PlaneGeometry(width, height, segments, 1);
+          var position = geometry.attributes.position;
+          var halfWidth = width / 2;
+          var bendDepth = curve * 0.8;
+
+          for (var i = 0; i < position.count; i++) {
+            var x = position.getX(i);
+            var normalizedX = x / halfWidth;
+            position.setZ(i, bendDepth * normalizedX * normalizedX);
+          }
+
+          geometry.computeVertexNormals();
+
+          var oldMesh = entity.getObject3D('mesh');
+          if (oldMesh) {
+            oldMesh.geometry.dispose();
+            oldMesh.material.dispose();
+          }
+
+          var material = texture
+            ? new THREE.MeshBasicMaterial({
+              map: texture,
+              side: THREE.DoubleSide,
+              toneMapped: false
+            })
+            : new THREE.MeshBasicMaterial({
+              color: color,
+              opacity: opacity,
+              transparent: opacity < 1,
+              side: THREE.DoubleSide
+            });
+          entity.setObject3D('mesh', new THREE.Mesh(geometry, material));
+        },
+
+        deleteScreen: function (screen) {
+          this.screens = this.screens.filter((item) => item !== screen);
+          if (this.activeScreen === screen) this.activeScreen = null;
+          if (this.movingScreen === screen) this.movingScreen = null;
+          screen.root.remove();
+          screen.iframe.remove();
+          screen.video.remove();
+          if (screen.videoTexture) screen.videoTexture.dispose();
+          screen.dragHandle.remove();
+          if (!this.activeScreen) this.panel.classList.remove('is-visible');
+          this.finishPlacement();
+        },
+
+        finishPlacement: function () {
+          this.isPlacing = false;
+          this.movingScreen = null;
+          this.button.classList.remove('is-active');
+          this.videoButton.classList.remove('is-active');
+        },
+
+        tick: function () {
+          if (!this.camera) return;
+
+          if (this.isPlacing && this.movingScreen) {
+            var cameraObject = this.camera.object3D;
+            var cameraPosition = new THREE.Vector3();
+            var direction = new THREE.Vector3();
+            cameraObject.getWorldPosition(cameraPosition);
+
+            var ndcX = (this.pointer.x / window.innerWidth) * 2 - 1;
+            var ndcY = -(this.pointer.y / window.innerHeight) * 2 + 1;
+            var raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.el.camera);
+            direction.copy(raycaster.ray.direction).normalize();
+
+            var target = cameraPosition.clone().add(direction.multiplyScalar(4));
+            target.y = Math.max(0.85, target.y);
+            this.movingScreen.root.object3D.position.copy(target);
+            this.movingScreen.root.object3D.lookAt(cameraPosition);
+          }
+
+          this.updateWebviews();
+        },
+
+        updateWebviews: function () {
+          if (!this.el.camera) return;
+
+          this.screens.forEach((screen) => {
+            var overlay = screen.iframe;
+            var dragHandle = screen.dragHandle;
+            if (!overlay) return;
+
+            if (screen.videoMode || screen.videoTexture) {
+              screen.iframe.hidden = true;
+              this.updateScreenDragHandle(screen, dragHandle);
+              return;
+            }
+
+            if (!screen.url) {
+              overlay.hidden = true;
+              if (dragHandle) dragHandle.hidden = true;
+              return;
+            }
+
+            screen.root.object3D.updateWorldMatrix(true, true);
+
+            var corners = [
+              new THREE.Vector3(-screen.width / 2, screen.height / 2, 0),
+              new THREE.Vector3(screen.width / 2, screen.height / 2, 0),
+              new THREE.Vector3(screen.width / 2, -screen.height / 2, 0),
+              new THREE.Vector3(-screen.width / 2, -screen.height / 2, 0)
+            ].map((corner) => {
+              corner.applyMatrix4(screen.root.object3D.matrixWorld);
+              return corner.project(this.el.camera);
+            });
+
+            if (corners.some((corner) => corner.z < -1 || corner.z > 1)) {
+              overlay.hidden = true;
+              if (dragHandle) dragHandle.hidden = true;
+              return;
+            }
+
+            var viewWidth = window.innerWidth;
+            var viewHeight = window.innerHeight;
+            var projectedCorners = corners.map((corner) => ({
+              x: (corner.x * 0.5 + 0.5) * viewWidth,
+              y: (-corner.y * 0.5 + 0.5) * viewHeight
+            }));
+            projectedCorners = this.alignCornersToViewer(projectedCorners);
+
+            var sourceWidth = 1000;
+            var sourceHeight = Math.max(1, sourceWidth * (screen.height / screen.width));
+            var matrix = this.getProjectiveTransform(
+              [
+                { x: 0, y: 0 },
+                { x: sourceWidth, y: 0 },
+                { x: sourceWidth, y: sourceHeight },
+                { x: 0, y: sourceHeight }
+              ],
+              projectedCorners
+            );
+
+            if (!matrix) {
+              overlay.hidden = true;
+              if (dragHandle) dragHandle.hidden = true;
+              return;
+            }
+
+            overlay.hidden = false;
+            overlay.style.width = sourceWidth + 'px';
+            overlay.style.height = sourceHeight + 'px';
+            overlay.style.left = '0';
+            overlay.style.top = '0';
+            overlay.style.transform = matrix;
+            overlay.style.pointerEvents = screen === this.activeScreen && !this.isPlacing ? 'auto' : 'none';
+
+            this.positionDragHandleFromCorners(screen, dragHandle, projectedCorners);
+          });
+        },
+
+        updateScreenDragHandle: function (screen, dragHandle) {
+          if (!dragHandle || !this.el.camera) return;
+
+          screen.root.object3D.updateWorldMatrix(true, true);
+          var corners = [
+            new THREE.Vector3(-screen.width / 2, screen.height / 2, 0),
+            new THREE.Vector3(screen.width / 2, screen.height / 2, 0),
+            new THREE.Vector3(screen.width / 2, -screen.height / 2, 0),
+            new THREE.Vector3(-screen.width / 2, -screen.height / 2, 0)
+          ].map((corner) => {
+            corner.applyMatrix4(screen.root.object3D.matrixWorld);
+            return corner.project(this.el.camera);
+          });
+
+          if (corners.some((corner) => corner.z < -1 || corner.z > 1)) {
+            dragHandle.hidden = true;
+            return;
+          }
+
+          var viewWidth = window.innerWidth;
+          var viewHeight = window.innerHeight;
+          var projectedCorners = this.alignCornersToViewer(corners.map((corner) => ({
+            x: (corner.x * 0.5 + 0.5) * viewWidth,
+            y: (-corner.y * 0.5 + 0.5) * viewHeight
+          })));
+          this.positionDragHandleFromCorners(screen, dragHandle, projectedCorners);
+        },
+
+        positionDragHandleFromCorners: function (screen, dragHandle, projectedCorners) {
+          if (!dragHandle) return;
+
+          if (screen !== this.activeScreen || this.isPlacing) {
+            dragHandle.hidden = true;
+            return;
+          }
+
+          var topLeft = projectedCorners[0];
+          var topRight = projectedCorners[1];
+          var topMidX = (topLeft.x + topRight.x) / 2;
+          var topMidY = (topLeft.y + topRight.y) / 2;
+          var topAngle = Math.atan2(topRight.y - topLeft.y, topRight.x - topLeft.x);
+
+          dragHandle.hidden = false;
+          dragHandle.style.left = topMidX + 'px';
+          dragHandle.style.top = topMidY + 'px';
+          dragHandle.style.transform = 'translate(-50%, -50%) rotate(' + topAngle + 'rad)';
+          dragHandle.style.pointerEvents = 'auto';
+        },
+
+        alignCornersToViewer: function (corners) {
+          if (corners[1].x >= corners[0].x) return corners;
+
+          return [
+            corners[1],
+            corners[0],
+            corners[3],
+            corners[2]
+          ];
+        },
+
+        getProjectiveTransform: function (from, to) {
+          var matrix = [];
+          var vector = [];
+
+          for (var i = 0; i < 4; i++) {
+            var x = from[i].x;
+            var y = from[i].y;
+            var u = to[i].x;
+            var v = to[i].y;
+
+            matrix.push([x, y, 1, 0, 0, 0, -u * x, -u * y]);
+            vector.push(u);
+            matrix.push([0, 0, 0, x, y, 1, -v * x, -v * y]);
+            vector.push(v);
+          }
+
+          var h = this.solveLinearSystem(matrix, vector);
+          if (!h) return null;
+
+          h.push(1);
+          return 'matrix3d(' + [
+            h[0], h[3], 0, h[6],
+            h[1], h[4], 0, h[7],
+            0, 0, 1, 0,
+            h[2], h[5], 0, h[8]
+          ].join(',') + ')';
+        },
+
+        solveLinearSystem: function (matrix, vector) {
+          var size = vector.length;
+
+          for (var column = 0; column < size; column++) {
+            var pivotRow = column;
+            for (var row = column + 1; row < size; row++) {
+              if (Math.abs(matrix[row][column]) > Math.abs(matrix[pivotRow][column])) {
+                pivotRow = row;
+              }
+            }
+
+            if (Math.abs(matrix[pivotRow][column]) < 0.000001) return null;
+
+            var tempRow = matrix[column];
+            matrix[column] = matrix[pivotRow];
+            matrix[pivotRow] = tempRow;
+
+            var tempValue = vector[column];
+            vector[column] = vector[pivotRow];
+            vector[pivotRow] = tempValue;
+
+            var pivot = matrix[column][column];
+            for (var normalizeColumn = column; normalizeColumn < size; normalizeColumn++) {
+              matrix[column][normalizeColumn] /= pivot;
+            }
+            vector[column] /= pivot;
+
+            for (var eliminateRow = 0; eliminateRow < size; eliminateRow++) {
+              if (eliminateRow === column) continue;
+
+              var factor = matrix[eliminateRow][column];
+              for (var eliminateColumn = column; eliminateColumn < size; eliminateColumn++) {
+                matrix[eliminateRow][eliminateColumn] -= factor * matrix[column][eliminateColumn];
+              }
+              vector[eliminateRow] -= factor * vector[column];
+            }
+          }
+
+          return vector;
+        }
+      });
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+        font-size: 17px;
+        line-height: 1.47059;
+        letter-spacing: 0;
+      }
+
+      #welcome-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        box-sizing: border-box;
+        pointer-events: auto;
+      }
+
+      #welcome-overlay.is-hidden {
+        display: none;
+      }
+
+      .welcome-card {
+        width: min(980px, calc(100vw - 48px));
+        min-height: 0;
+        max-height: calc(100vh - 48px);
+        padding: clamp(34px, 5vh, 56px) clamp(24px, 4vw, 52px);
+        box-sizing: border-box;
+        overflow: hidden;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.38);
+        border-radius: 26px;
+        background: rgba(255, 255, 255, 0.16);
+        box-shadow: 0 14px 38px rgba(2, 6, 23, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+        color: #f8fafc;
+        text-align: center;
+        backdrop-filter: blur(18px) saturate(150%);
+        -webkit-backdrop-filter: blur(18px) saturate(150%);
+      }
+
+      .welcome-message {
+        display: grid;
+        gap: 22px;
+        margin: 0;
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 1.55;
+        letter-spacing: 0;
+        word-break: keep-all;
+        overflow-wrap: break-word;
+        text-align: center;
+      }
+
+      .welcome-message span {
+        display: block;
+        white-space: normal;
+      }
+
+      .a-enter-vr {
+        display: none !important;
+      }
+
+      #mode-button-group {
+        position: fixed;
+        left: 50%;
+        bottom: 28px;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        transform: translateX(-50%);
+      }
+
+      #screen-button,
+      #video-mode-button,
+      #buy-page-button {
+        min-width: 132px;
+        height: 48px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(255, 255, 255, 0.38);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.16);
+        color: #f8fafc;
+        box-shadow: 0 14px 38px rgba(2, 6, 23, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+        backdrop-filter: blur(18px) saturate(150%);
+        -webkit-backdrop-filter: blur(18px) saturate(150%);
+        cursor: grab;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 1.25;
+        letter-spacing: 0;
+        touch-action: none;
+        user-select: none;
+        text-decoration: none;
+      }
+
+      #domain-back-button {
+        position: fixed;
+        left: 24px;
+        top: 24px;
+        z-index: 12;
+        width: 48px;
+        height: 48px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 0;
+        background: transparent;
+        color: transparent;
+        cursor: pointer;
+        text-decoration: none;
+      }
+
+      #domain-back-button::before {
+        content: "";
+        width: 22px;
+        height: 22px;
+        border-left: 6px solid #5f6368;
+        border-bottom: 6px solid #5f6368;
+        border-radius: 3px;
+        transform: rotate(45deg);
+      }
+
+      #video-mode-button {
+        min-width: 150px;
+        cursor: pointer;
+      }
+
+      #buy-page-button {
+        min-width: 150px;
+        border-color: rgba(0, 113, 227, 0.86);
+        background: #0071e3;
+        color: #ffffff;
+        box-shadow: 0 16px 38px rgba(0, 113, 227, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.26);
+        cursor: pointer;
+      }
+
+      #screen-button:active,
+      #screen-button.is-active,
+      #video-mode-button:active,
+      #video-mode-button.is-active,
+      #buy-page-button:active {
+        cursor: grabbing;
+        background: rgba(255, 255, 255, 0.24);
+        border-color: rgba(255, 255, 255, 0.58);
+      }
+
+      #buy-page-button:active {
+        background: #005bb5;
+        border-color: rgba(0, 91, 181, 0.9);
+        cursor: pointer;
+      }
+
+      #domain-back-button:active {
+        opacity: 0.72;
+      }
+
+      #air-icon-layer {
+        position: fixed;
+        inset: 0;
+        z-index: 9;
+        display: grid;
+        place-items: center;
+        pointer-events: none;
+        perspective: 900px;
+      }
+
+      #air-icon-layer.is-visible {
+        pointer-events: auto;
+      }
+
+      .air-icon-palette {
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        gap: clamp(12px, 2.2vw, 28px);
+        padding: 18px 22px;
+        transform: translateY(-12vh) rotateX(5deg);
+        opacity: 0;
+        transition: opacity 180ms ease, transform 220ms ease;
+        pointer-events: none;
+      }
+
+      #air-icon-layer.is-visible .air-icon-palette {
+        opacity: 1;
+        transform: translateY(-12vh) rotateX(0deg);
+        pointer-events: auto;
+      }
+
+      .screen-launch-icon {
+        --icon-delay: 0ms;
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+        width: 92px;
+        border: 0;
+        background: transparent;
+        color: #f8fafc;
+        cursor: pointer;
+        font: inherit;
+        font-size: 12.5px;
+        font-weight: 600;
+        line-height: 1.3;
+        letter-spacing: 0;
+        text-shadow: 0 3px 14px rgba(2, 6, 23, 0.44);
+        transform: translateY(10px) scale(0.96);
+        opacity: 0;
+        transition: transform 180ms ease var(--icon-delay), opacity 180ms ease var(--icon-delay);
+      }
+
+      #air-icon-layer.is-visible .screen-launch-icon {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+      }
+
+      .screen-launch-icon:hover {
+        transform: translateY(-8px) scale(1.05);
+      }
+
+      .screen-launch-mark {
+        display: grid;
+        place-items: center;
+        width: 72px;
+        height: 72px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.48);
+        border-radius: 20px;
+        box-shadow: 0 22px 46px rgba(2, 6, 23, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+        backdrop-filter: blur(18px) saturate(150%);
+        -webkit-backdrop-filter: blur(18px) saturate(150%);
+        font-size: 28px;
+        font-weight: 900;
+        line-height: 1;
+      }
+
+      .screen-launch-mark-logo img {
+        width: 56px;
+        height: 56px;
+        object-fit: contain;
+      }
+
+      .screen-launch-mark-coupang img {
+        width: 58px;
+        height: 58px;
+      }
+
+      .screen-launch-label {
+        width: 100%;
+        overflow-wrap: anywhere;
+      }
+
+      #screen-panel {
+        position: fixed;
+        right: 28px;
+        top: 50%;
+        z-index: 11;
+        width: 238px;
+        padding: 18px;
+        transform: translateY(-50%) translateX(24px);
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        border-radius: 26px;
+        background: rgba(30, 41, 59, 0.58);
+        box-shadow: 0 18px 48px rgba(2, 6, 23, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+        backdrop-filter: blur(20px) saturate(150%);
+        -webkit-backdrop-filter: blur(20px) saturate(150%);
+        color: #f8fafc;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 180ms ease, transform 180ms ease;
+        user-select: none;
+      }
+
+      #screen-panel.is-visible {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(-50%) translateX(0);
+      }
+
+      .screen-panel-title {
+        margin: 0 0 18px;
+        font-size: 19px;
+        font-weight: 600;
+        line-height: 1.25;
+        letter-spacing: 0;
+        text-align: center;
+      }
+
+      .screen-slider {
+        display: grid;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .screen-slider.is-hidden {
+        display: none;
+      }
+
+      .screen-slider-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 12.5px;
+        font-weight: 500;
+        line-height: 1.35;
+        color: rgba(248, 250, 252, 0.88);
+      }
+
+      .screen-slider-row output {
+        min-width: 34px;
+        text-align: right;
+        color: #ffffff;
+      }
+
+      .screen-slider input {
+        width: 100%;
+        accent-color: #f8fafc;
+        cursor: pointer;
+      }
+
+      .screen-web-form {
+        display: grid;
+        grid-template-columns: 1fr 48px;
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .screen-web-form input,
+      .screen-web-form button {
+        height: 36px;
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.14);
+        color: #f8fafc;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 500;
+        line-height: 1.35;
+        letter-spacing: 0;
+        outline: none;
+      }
+
+      .screen-web-form input {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 0 13px;
+      }
+
+      .screen-web-form input::placeholder {
+        color: rgba(248, 250, 252, 0.56);
+      }
+
+      .screen-web-form button {
+        cursor: pointer;
+      }
+
+      #screen-web-layer {
+        position: fixed;
+        inset: 0;
+        z-index: 6;
+        pointer-events: none;
+      }
+
+      .screen-webview {
+        position: fixed;
+        z-index: 1;
+        border: 0;
+        background: #ffffff;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
+        transform-origin: 0 0;
+        will-change: transform;
+      }
+
+      .screen-drag-handle {
+        position: fixed;
+        z-index: 2;
+        display: grid;
+        place-items: center;
+        width: 118px;
+        height: 26px;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.24);
+        box-shadow: 0 10px 26px rgba(2, 6, 23, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        cursor: grab;
+        transform-origin: center;
+        will-change: transform;
+      }
+
+      .screen-drag-handle:active {
+        cursor: grabbing;
+      }
+
+      .screen-drag-handle span {
+        width: 72px;
+        height: 4px;
+        border-radius: 999px;
+        background: rgba(248, 250, 252, 0.82);
+        box-shadow: 0 4px 14px rgba(2, 6, 23, 0.28);
+      }
+
+      .screen-launcher {
+        position: fixed;
+        overflow: hidden;
+        border: 0;
+        background: #c4b5fd;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+        transform-origin: 0 0;
+        will-change: transform;
+      }
+
+      .mac-wallpaper {
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(ellipse at 10% 16%, rgba(255, 255, 255, 0.48), transparent 18%),
+          radial-gradient(ellipse at 16% 18%, rgba(167, 139, 250, 0.86), transparent 34%),
+          radial-gradient(ellipse at 82% 18%, rgba(216, 180, 254, 0.86), transparent 30%),
+          radial-gradient(ellipse at 48% 78%, rgba(129, 140, 248, 0.78), transparent 36%),
+          linear-gradient(135deg, #ede9fe 0%, #c4b5fd 38%, #8b5cf6 100%);
+        pointer-events: none;
+      }
+
+      .mac-wallpaper::before,
+      .mac-wallpaper::after {
+        content: "";
+        position: absolute;
+        width: 44%;
+        height: 110%;
+        top: -8%;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.28);
+        filter: blur(1px);
+        transform: rotate(16deg);
+      }
+
+      .mac-wallpaper::before {
+        left: 2%;
+      }
+
+      .mac-wallpaper::after {
+        right: 18%;
+        background: rgba(124, 58, 237, 0.26);
+      }
+
+      .mac-window {
+        position: absolute;
+        overflow: hidden;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.8);
+        box-shadow: 0 28px 70px rgba(59, 7, 100, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+      }
+
+      .mac-window-back {
+        width: 46%;
+        height: 54%;
+        right: 8%;
+        top: 12%;
+        transform: rotate(2deg);
+      }
+
+      .mac-window-front {
+        width: 68%;
+        height: 58%;
+        left: 16%;
+        top: 18%;
+      }
+
+      .mac-window-bar {
+        display: flex;
+        gap: 7px;
+        align-items: center;
+        height: 34px;
+        padding: 0 13px;
+        background: rgba(248, 250, 252, 0.82);
+      }
+
+      .mac-window-bar span {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+      }
+
+      .mac-window-bar span:nth-child(1) {
+        background: #ff5f57;
+      }
+
+      .mac-window-bar span:nth-child(2) {
+        background: #ffbd2e;
+      }
+
+      .mac-window-bar span:nth-child(3) {
+        background: #28c840;
+      }
+
+      .mac-window-hero {
+        display: grid;
+        place-items: center;
+        height: calc(100% - 34px);
+        color: rgba(76, 29, 149, 0.9);
+        font-size: 54px;
+        font-weight: 700;
+        line-height: 1.05;
+        letter-spacing: 0;
+      }
+
+      .screen-launcher-grid {
+        height: calc(100% - 34px);
+        display: grid;
+        grid-template-columns: repeat(5, minmax(94px, 1fr));
+        align-content: center;
+        justify-content: center;
+        gap: 18px;
+        padding: 34px;
+        box-sizing: border-box;
+      }
+
+      .screen-launcher-button {
+        display: grid;
+        justify-items: center;
+        gap: 14px;
+        border: 0;
+        background: transparent;
+        color: #ffffff;
+        cursor: pointer;
+        font: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.3;
+        letter-spacing: 0;
+        text-shadow: 0 2px 10px rgba(76, 29, 149, 0.32);
+      }
+
+      .screen-launcher-icon {
+        display: grid;
+        place-items: center;
+        width: 76px;
+        height: 76px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.38);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 22px 42px rgba(15, 23, 42, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.76);
+        backdrop-filter: blur(18px) saturate(140%);
+        -webkit-backdrop-filter: blur(18px) saturate(140%);
+      }
+
+      .screen-launcher-icon img {
+        width: 44px;
+        height: 44px;
+        object-fit: contain;
+      }
+
+      .screen-launcher-icon img[alt="Coupang"] {
+        width: 58px;
+        height: 58px;
+      }
+
+      .google-logo {
+        font-size: 48px;
+        font-weight: 900;
+        line-height: 1;
+        background: conic-gradient(from -35deg, #4285f4 0 28%, #34a853 0 45%, #fbbc05 0 63%, #ea4335 0 78%, #4285f4 0);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        font-family: Arial, sans-serif;
+      }
+
+      .coupang-logo {
+        display: flex;
+        align-items: baseline;
+        gap: 1px;
+        font-family: Arial, sans-serif;
+        line-height: 1;
+      }
+
+      .coupang-logo b {
+        color: #ef4444;
+        font-size: 46px;
+        font-style: normal;
+      }
+
+      .coupang-logo i {
+        color: #2563eb;
+        font-size: 36px;
+        font-style: normal;
+        font-weight: 900;
+      }
+
+      .mac-dock {
+        position: absolute;
+        left: 50%;
+        bottom: 20px;
+        display: flex;
+        gap: 10px;
+        padding: 10px 16px;
+        border: 1px solid rgba(255, 255, 255, 0.42);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.34);
+        box-shadow: 0 16px 34px rgba(76, 29, 149, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.54);
+        backdrop-filter: blur(18px) saturate(140%);
+        -webkit-backdrop-filter: blur(18px) saturate(140%);
+        transform: translateX(-50%);
+      }
+
+      .mac-dock span {
+        width: 28px;
+        height: 28px;
+        border-radius: 9px;
+        background: linear-gradient(135deg, #ffffff, #a78bfa);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+      }
+    </style> 
+  </head> 
+  <body> 
+    <div id="welcome-overlay" aria-labelledby="welcome-message">
+      <div class="welcome-card">
+        <p id="welcome-message" class="welcome-message">
+          <span>VisionSpace Preview에 오신 것을 환영합니다.</span>
+          <span>이 공간은 Apple Vision Pro를 실제로 착용하지 않아도<br>공간 컴퓨팅을 미리 체험할 수 있도록 설계된 가상 공간입니다.<br>공간 위에 배치되는 콘텐츠, 몰입형 엔터테인먼트 환경으로<br>Apple Vision Pro가 일상과 미디어 경험을 어떻게 바꾸는지 확인할 수 있습니다.</span>
+          <span>체험을 시작하면 콘텐츠 패널과 인터랙션 요소를 하나씩 선택해 보세요.<br>Vision Pro의 주요 기능을 가상 공간 에서 탐색할 수 있습니다.</span>
+          <span>공간을 둘러보며, 새로운 컴퓨팅 경험의 확장을 느껴보세요.</span>
+        </p>
+      </div>
+    </div>
+    <a-scene background="color: #000000" cursor="rayOrigin: mouse" raycaster="objects: .floating-screen, .screen-control, .screen-launch-icon" vr-mode-ui="enabled: false" screen-tool> 
+      <a-assets></a-assets>
+      <a-entity light="type: ambient; intensity: 0.8; color: #94a3b8"></a-entity> 
+      <a-entity light="type: point; intensity: 1.2; distance: 80" position="0 6 6"></a-entity> 
+      <a-plane
+        position="0 0 -4"
+        rotation="-90 0 0"
+        width="28"
+        height="28"
+        fade-floor
+      ></a-plane>
+      <a-plane
+        position="0 0.08 -3.05"
+        rotation="-90 0 0"
+        width="3.4"
+        height="3.4"
+        apple-floor-mark
+      ></a-plane>
+      <a-entity id="camera-rig" position="0 0 0"> 
+        <a-camera
+          position="0 1.65 0"
+          look-controls
+          wasd-controls="acceleration: 20; fly: false"
+          lock-y-position="height: 1.65"
+        ></a-camera> 
+      </a-entity> 
+    </a-scene> 
+    <div id="air-icon-layer" aria-hidden="true"></div>
+    <a id="domain-back-button" href="../index_visionspace_preview.html" aria-label="도메인으로 돌아가기">&lt;</a>
+    <div id="mode-button-group" aria-label="screen modes">
+      <button id="screen-button" type="button">screen</button>
+      <button id="video-mode-button" type="button">video mode</button>
+      <a id="buy-page-button" href="https://www.apple.com/kr/shop/buy-vision/apple-vision-pro">구매하기</a>
+    </div>
+    <aside id="screen-panel" aria-label="screen size controls">
+      <h2 class="screen-panel-title">screen</h2>
+      <label class="screen-slider" for="screen-width">
+        <span class="screen-slider-row">
+          <span>width</span>
+          <output id="screen-width-value">3.2</output>
+        </span>
+        <input id="screen-width" type="range" min="1.1" max="7" step="0.1" value="3.2" />
+      </label>
+      <label class="screen-slider" for="screen-height">
+        <span class="screen-slider-row">
+          <span>height</span>
+          <output id="screen-height-value">1.8</output>
+        </span>
+        <input id="screen-height" type="range" min="0.7" max="4" step="0.1" value="1.8" />
+      </label>
+      <label id="screen-curve-label" class="screen-slider" for="screen-curve">
+        <span class="screen-slider-row">
+          <span>curve</span>
+          <output id="screen-curve-value">0.0</output>
+        </span>
+        <input id="screen-curve" type="range" min="0" max="1.6" step="0.1" value="0" />
+      </label>
+      <div class="screen-web-form">
+        <input id="screen-url" type="url" placeholder="https://example.com" autocomplete="off" />
+        <button id="screen-go" type="button">Go</button>
+      </div>
+    </aside>
+    <div id="screen-web-layer" aria-hidden="true"></div>
+    <script>
+      const welcomeOverlay = document.querySelector('#welcome-overlay');
+
+      if (welcomeOverlay) {
+        welcomeOverlay.addEventListener('pointerdown', () => {
+          welcomeOverlay.classList.add('is-hidden');
+        });
+      }
+    </script>
+  </body> 
+</html>
